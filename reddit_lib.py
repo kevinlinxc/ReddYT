@@ -1,10 +1,6 @@
 import time
-from io import BytesIO
 
-from selenium.webdriver.common.by import By
 from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
 from pyshadow.main import Shadow
 import praw
