@@ -9,9 +9,6 @@ load_dotenv()
 # functions that each produce a video/videos for the YouTube channels
 def make_askreddit_video():
     try:
-        # 0. Notify Discord that we're starting
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(discord_lib.notify("##############################\nStarting AskReddit video!\n\n"))
         # 1. Get the popular recent posts
         posts_with_comments = reddit_lib.get_n_posts_with_m_comments("AskReddit", 1, 5)
 

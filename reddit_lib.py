@@ -1,5 +1,6 @@
 import time
 from selenium import webdriver
+from selenium.common.exceptions import ElementNotVisibleException
 from pyshadow.main import Shadow
 import praw
 import json
@@ -95,7 +96,6 @@ def capture_reddit_mobile_post_card(post_id, image_path):
     }
     options = webdriver.ChromeOptions()
     options.add_experimental_option("mobileEmulation", mobile_emulation)
-    options.add_argument("--headless")
     driver = webdriver.Chrome(options=options)
 
     # Navigate to the post and wait for the preview card to load
@@ -129,7 +129,6 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
     }
     options = webdriver.ChromeOptions()
     options.add_experimental_option("mobileEmulation", mobile_emulation)
-    options.add_argument("--headless")
     driver = webdriver.Chrome(options=options)
 
     # Navigate to the post and wait for the preview card to load
@@ -141,8 +140,11 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
 
     time.sleep(2)
     # close the comments thread so the screenshot only captures the first comment
-    shadow.find_element('[id="comment-fold-button"]').click()
-    time.sleep(1)
+    try:
+        shadow.find_element('[id="comment-fold-button"]').click()
+        time.sleep(1)
+    except ElementNotVisibleException:
+        pass
     comment_element = shadow.find_element(f'[thingid="t1_{comment_id}"]')
     with open(image_path, "wb") as f:
         f.write(comment_element.screenshot_as_png)

@@ -4,7 +4,7 @@ import asyncio
 from reddit_lib import PostWithComments, MetaComment, MetaPost
 import os
 
-channel_id = 912261061233750109
+channel_id = 1092145376846434405
 bot_token = os.environ.get('DISCORD_TOKEN')
 
 
@@ -26,27 +26,42 @@ async def curate(post_with_comments: PostWithComments, callback):
         n = len(comments)
 
         # create the message with the question and answers
-        message = 'Post: ' + post_with_comments.post.text + '\n\nComments:\n'
+        message = ""
         for i in range(n):
             message += f'{chr(65 + i)}: {comments[i].text}\n'
-        message += '\nReact with the letters of your chosen answers and ✅ to confirm or ❌ to cancel.'
-
+        message += '\nReact with the letters of your chosen answers and ✅ to confirm or ❌ to cancel. ' \
+                   '\nYou can also react with 👍 to select all the comments.'
+        await channel.send("##############################\nStarting AskReddit video!\n\n")
+        await channel.send(file=discord.File(post_with_comments.post.path_to_image))
         sent_message = await channel.send(message)
 
         # add the reactions
         for i in range(n):
             await sent_message.add_reaction(chr(127462 + i))  # add the regional_indicator reactions
-        await sent_message.add_reaction('✅')  # add the check reaction
-        await sent_message.add_reaction('❌')  # add the X reaction
+        await sent_message.add_reaction('✅')  # for confirming comment selection
+        await sent_message.add_reaction('❌')  # for declining the post
+        await sent_message.add_reaction('👍')  # for okaying all the comments
 
         letter_react_unicode = set([chr(127462 + i) for i in range(n)])
 
         def check(reaction, user):
-            return user != client.user and str(reaction.emoji) in letter_react_unicode.union({'✅', '❌'})
+            return user != client.user and str(reaction.emoji) in letter_react_unicode.union({'✅', '❌', '👍'})
 
         while True:
             try:
                 reaction, user = await client.wait_for('reaction_add', timeout=None, check=check)
+                if str(reaction.emoji) == '👍':
+                    # update sent_message
+                    sent_message = await channel.fetch_message(sent_message.id)
+                    ml_data_writer.write_post_to_csv(post_with_comments.post, True)
+                    for comment in comments:
+                        ml_data_writer.write_comment_to_csv(comment, True)
+                    confirmation_message = f"Okayed all comments"
+                    await channel.send(confirmation_message)
+                    print(confirmation_message)
+                    future.set_result(post_with_comments)
+                    return
+
                 if str(reaction.emoji) == '✅':
                     # update sent_message
                     sent_message = await channel.fetch_message(sent_message.id)
@@ -61,8 +76,10 @@ async def curate(post_with_comments: PostWithComments, callback):
                             ml_data_writer.write_comment_to_csv(comment, False)
                     post_with_comments.comments = chosen_answers
 
-                    await channel.send(
-                        f"Picked comments {', '.join([str(reaction.emoji) for reaction in sent_message.reactions if str(reaction.emoji) in letter_react_unicode and reaction.count > 1])}")
+                    confirmation_message = f"Picked comments {', '.join([str(reaction.emoji) for reaction in sent_message.reactions if str(reaction.emoji) in letter_react_unicode and reaction.count > 1])}"
+                    await channel.send(confirmation_message)
+                    print(confirmation_message)
+
                     future.set_result(post_with_comments)
                     return
                 elif str(reaction.emoji) == '❌':
