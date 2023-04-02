@@ -1,5 +1,4 @@
 import discord
-from discord.ext import commands
 import ml_data_writer
 import asyncio
 from reddit_lib import PostWithComments, MetaComment, MetaPost
@@ -86,6 +85,22 @@ async def curate(post_with_comments: PostWithComments, callback):
     return future
 
 
+async def notify(message):
+    """Function that just sends a message to the channel, to be used for exceptions etc."""
+    client = discord.Client(intents=discord.Intents.all())
+
+    async def _notify(channel):
+        await channel.send(message)
+
+    @client.event
+    async def on_ready():
+        channel = client.get_channel(channel_id)
+        await _notify(channel)
+        await client.close()
+
+    await client.start(bot_token)
+
+
 def dummy_callback(future: asyncio.Future):
     print(future.result())
     if isinstance(future.result(), PostWithComments):
@@ -93,15 +108,18 @@ def dummy_callback(future: asyncio.Future):
 
 
 if __name__ == '__main__':
-    bot_loop = asyncio.get_event_loop()
-    curated_post: asyncio.Future = bot_loop.run_until_complete(curate(PostWithComments(MetaPost("Test question", "128ukfw", "hi.png"),
-                                                                       [MetaComment("Test answer 1", "128ukfw",
-                                                                                    "128ukfw", "hi.png"),
-                                                                        MetaComment("Test answer 2", "128ukfw",
-                                                                                    "128ukfw", "hi.png"),
-                                                                        MetaComment("Test answer 3", "128ukfw",
-                                                                                    "128ukfw", "hi.png"),
-                                                                        MetaComment("Test answer 4", "128ukfw",
-                                                                                    "128ukfw",
-                                                                                    "hi.png"), ]), dummy_callback))
+    from dotenv import load_dotenv
 
+    load_dotenv()
+    bot_loop = asyncio.get_event_loop()
+    curated_post: asyncio.Future = bot_loop.run_until_complete(
+        curate(PostWithComments(MetaPost("Test question", "128ukfw", "hi.png"),
+                                [MetaComment("Test answer 1", "128ukfw",
+                                             "128ukfw", "hi.png"),
+                                 MetaComment("Test answer 2", "128ukfw",
+                                             "128ukfw", "hi.png"),
+                                 MetaComment("Test answer 3", "128ukfw",
+                                             "128ukfw", "hi.png"),
+                                 MetaComment("Test answer 4", "128ukfw",
+                                             "128ukfw",
+                                             "hi.png"), ], "AskReddit"), dummy_callback))

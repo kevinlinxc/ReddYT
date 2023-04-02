@@ -1,13 +1,13 @@
 import time
-
 from selenium import webdriver
-from PIL import Image
 from pyshadow.main import Shadow
 import praw
 import json
 from dataclasses import dataclass
 from typing import Optional
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 
 @dataclass
@@ -26,9 +26,10 @@ class MetaComment:
 
 
 class PostWithComments:
-    def __init__(self, post: MetaPost, comments: list):
+    def __init__(self, post: MetaPost, comments: list, subreddit: str):
         self.post = post
         self.comments = comments
+        self.subreddit = subreddit
 
 
 class PostFailedToCapture(Exception):
@@ -39,20 +40,21 @@ class CommentFailedToCapture(Exception):
     pass
 
 
-def get_top_n_post_ids(praw_inst, subreddit, n, time_filter="week"):
+def get_top_n_post_ids(praw_inst, subreddit, n, time_filter="day"):
     """Get the IDs of the top n posts from a subreddit.
 
     Args:
         subreddit (str): The name of the subreddit to get posts from.
         n (int): The number of posts to get.
-
+        :param time_filter:
     Returns:
         list: A list of post IDs.
+
     """
     # ignore nsfw posts, they have an annoying modal, and we don't want them on YouTube anyway
     return_list = []
     posts_found = 0
-    for post in praw_inst.subreddit(subreddit).top(limit=n * 2 + 5, time_filter=time_filter):
+    for post in praw_inst.subreddit(subreddit).top(time_filter=time_filter):
         if not post.over_18:
             return_list.append(MetaPost(text=post.title, post_id=post.id))
             posts_found += 1
@@ -83,9 +85,8 @@ def capture_reddit_mobile_post_card(post_id, image_path):
 
     Args:
         post_id (str): The ID of the Reddit post to capture.
-
-    Returns:
-        Image: The screenshot of the mobile preview card as a Pillow Image object.
+        image_path (str): The path to save the image to.
+    Returns none
     """
     # Set up the Chrome driver with mobile device emulation
     mobile_emulation = {
@@ -94,16 +95,17 @@ def capture_reddit_mobile_post_card(post_id, image_path):
     }
     options = webdriver.ChromeOptions()
     options.add_experimental_option("mobileEmulation", mobile_emulation)
+    options.add_argument("--headless")
     driver = webdriver.Chrome(options=options)
 
     # Navigate to the post and wait for the preview card to load
     driver.get(f"https://www.reddit.com/{post_id}")
-    time.sleep(4)
+    time.sleep(3)
     shadow = Shadow(driver)
     continue_button = shadow.find_element_by_xpath('//*[@id="secondary-button"]/span/span')
     continue_button.click()
 
-    time.sleep(3)
+    time.sleep(2)
 
     preview_card_element = shadow.find_element_by_xpath(f'//*[@id="t3_{post_id}"]')
     with open(image_path, "wb") as f:
@@ -117,9 +119,8 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
     Args:
         post_id (str): The ID of the Reddit post to capture.
         comment_id (str): The ID of the comment to capture.
-
-    Returns:
-        Image: The screenshot of the mobile preview card as a Pillow Image object.
+        image_path (str): The path to save the image to.
+        subreddit (str): The subreddit the post is in (to form the URL)
     """
     # Set up the Chrome driver with mobile device emulation
     mobile_emulation = {
@@ -128,16 +129,17 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
     }
     options = webdriver.ChromeOptions()
     options.add_experimental_option("mobileEmulation", mobile_emulation)
+    options.add_argument("--headless")
     driver = webdriver.Chrome(options=options)
 
     # Navigate to the post and wait for the preview card to load
     driver.get(f"https://www.reddit.com/r/{subreddit}/comments/{post_id}/comment/{comment_id}")
-    time.sleep(4)
+    time.sleep(3)
     shadow = Shadow(driver)
     continue_button = shadow.find_element_by_xpath('//*[@id="secondary-button"]/span/span')
     continue_button.click()
 
-    time.sleep(3)
+    time.sleep(2)
     # close the comments thread so the screenshot only captures the first comment
     shadow.find_element('[id="comment-fold-button"]').click()
     time.sleep(1)
@@ -147,15 +149,12 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
     driver.quit()
 
 
-with open('config.json') as config_file:
-    config = json.load(config_file)['keys']
-
 # Sign in to Reddit using API Key
 reddit = praw.Reddit(user_agent="Fetching top posts to compile into an informative video",
-                     client_id=config['client_id'],
-                     client_secret=config['client_secret'],
-                     username=config['username'],
-                     password=config['password'])
+                     client_id=os.environ['reddit_client_id'],
+                     client_secret=os.environ['reddit_client_secret'],
+                     username=os.environ['reddit_username'],
+                     password=os.environ['reddit_password'])
 
 
 def get_n_posts_with_m_comments(subreddit, n, m):
@@ -164,7 +163,7 @@ def get_n_posts_with_m_comments(subreddit, n, m):
     This is the main function that ties everything together.
     It returns a list of PostWithComments objects
     """
-    print(f"Getting top {n} posts from r/{subreddit} with {m} comments each")
+    print(f"1. Getting top {n} posts from r/{subreddit} with {m} comments each")
 
     top_posts = get_top_n_post_ids(reddit, subreddit, n)
     successful_meta_posts_with_comments = []
@@ -198,11 +197,14 @@ def get_n_posts_with_m_comments(subreddit, n, m):
             print("Failed to capture any comments for this post. Skipping...")
         else:
             # posts AND their comments succeeded, so make a PostWithComments object
-            successful_meta_posts_with_comments.append(PostWithComments(meta_post, successful_meta_comments))
+            successful_meta_posts_with_comments.append(PostWithComments(meta_post, successful_meta_comments, subreddit))
     if len(successful_meta_posts_with_comments) == 0:
         raise Exception(f"Failed to capture any posts or comments.")
+    print(f"Successfully captured {len(successful_meta_posts_with_comments)} posts with comments.")
     return successful_meta_posts_with_comments
 
 
 if __name__ == '__main__':
+    from dotenv import load_dotenv
+    load_dotenv()
     get_n_posts_with_m_comments("AskReddit", 1, 5)
