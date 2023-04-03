@@ -3,7 +3,6 @@ from selenium import webdriver
 from selenium.common.exceptions import ElementNotVisibleException
 from pyshadow.main import Shadow
 import praw
-import json
 from dataclasses import dataclass
 from typing import Optional
 import os
@@ -13,6 +12,7 @@ load_dotenv()
 
 @dataclass
 class MetaPost:
+    """A class to hold the metadata of a Reddit post."""
     text: str  # title
     post_id: str
     path_to_image: Optional[str] = None
@@ -20,6 +20,7 @@ class MetaPost:
 
 @dataclass
 class MetaComment:
+    """A class to hold the metadata of a Reddit comment."""
     text: str
     post_id: str
     comment_id: str
@@ -27,6 +28,10 @@ class MetaComment:
 
 
 class PostWithComments:
+    """
+    A class to hold a Reddit post and its comments together. Used as the main data structure being passed around
+    for this project.
+    """
     def __init__(self, post: MetaPost, comments: list, subreddit: str):
         self.post = post
         self.comments = comments
@@ -91,21 +96,20 @@ def capture_reddit_mobile_post_card(post_id, image_path):
     """
     # Set up the Chrome driver with mobile device emulation
     mobile_emulation = {
-        "deviceMetrics": {"width": 375, "height": 667, "pixelRatio": 3.0},
+        "deviceMetrics": {"width": 400, "height": 700, "pixelRatio": 3.0},
         "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3 like Mac OS X) AppleWebKit/602.1.50 (KHTML, like Gecko) CriOS/56.0.2924.75 Mobile Safari/535.19"
     }
     options = webdriver.ChromeOptions()
     options.add_experimental_option("mobileEmulation", mobile_emulation)
     driver = webdriver.Chrome(options=options)
+    driver.execute_script("document.body.style.zoom='120%'")
 
     # Navigate to the post and wait for the preview card to load
     driver.get(f"https://www.reddit.com/{post_id}")
-    time.sleep(3)
     shadow = Shadow(driver)
+    shadow.set_explicit_wait(10, 2)
     continue_button = shadow.find_element_by_xpath('//*[@id="secondary-button"]/span/span')
     continue_button.click()
-
-    time.sleep(2)
 
     preview_card_element = shadow.find_element_by_xpath(f'//*[@id="t3_{post_id}"]')
     with open(image_path, "wb") as f:
@@ -113,7 +117,7 @@ def capture_reddit_mobile_post_card(post_id, image_path):
     driver.quit()
 
 
-def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
+def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit, retry=False):
     """Capture a screenshot of the mobile preview card for a Reddit post's comment.
 
     Args:
@@ -124,31 +128,37 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit):
     """
     # Set up the Chrome driver with mobile device emulation
     mobile_emulation = {
-        "deviceMetrics": {"width": 375, "height": 667, "pixelRatio": 3.0},
+        "deviceMetrics": {"width": 400, "height": 700, "pixelRatio": 3.0},
         "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3 like Mac OS X) AppleWebKit/602.1.50 (KHTML, like Gecko) CriOS/56.0.2924.75 Mobile Safari/535.19"
     }
     options = webdriver.ChromeOptions()
     options.add_experimental_option("mobileEmulation", mobile_emulation)
     driver = webdriver.Chrome(options=options)
+    driver.execute_script("document.body.style.zoom='120%'")
 
     # Navigate to the post and wait for the preview card to load
     driver.get(f"https://www.reddit.com/r/{subreddit}/comments/{post_id}/comment/{comment_id}")
-    time.sleep(3)
     shadow = Shadow(driver)
+    shadow.set_explicit_wait(10, 2)
     continue_button = shadow.find_element_by_xpath('//*[@id="secondary-button"]/span/span')
     continue_button.click()
 
-    time.sleep(2)
     # close the comments thread so the screenshot only captures the first comment
     try:
         shadow.find_element('[id="comment-fold-button"]').click()
-        time.sleep(1)
-    except ElementNotVisibleException:
+    except ElementNotVisibleException:  # some comments might not have replies, ignore
         pass
-    comment_element = shadow.find_element(f'[thingid="t1_{comment_id}"]')
-    with open(image_path, "wb") as f:
-        f.write(comment_element.screenshot_as_png)
-    driver.quit()
+    try:
+        comment_element = shadow.find_element(f'[thingid="t1_{comment_id}"]')
+
+        with open(image_path, "wb") as f:
+            f.write(comment_element.screenshot_as_png)
+        driver.quit()
+    except ElementNotVisibleException as e:
+        if retry:
+            raise e
+        capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit, retry=True)
+
 
 
 # Sign in to Reddit using API Key

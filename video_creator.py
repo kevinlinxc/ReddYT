@@ -3,14 +3,19 @@ from google.cloud import texttospeech
 import os
 import numpy as np
 from moviepy.editor import (
+    VideoFileClip,
     ImageClip,
     concatenate_videoclips,
     CompositeVideoClip,
+    CompositeAudioClip,
     AudioFileClip
 )
 import asyncio
 import cv2
-
+import youtube_lib
+import random
+from moviepy.audio.fx import audio_normalize, audio_fadein, audio_fadeout, volumex
+from pydub import AudioSegment
 
 # voices: https://cloud.google.com/text-to-speech/docs/voices
 
@@ -22,8 +27,8 @@ def tts(text, output_file):
     voice = texttospeech.VoiceSelectionParams(
         language_code="en-US", name="en-US-Studio-M")
     audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3, speaking_rate=1,
-        effects_profile_id=['headset-class-device'])
+        audio_encoding=texttospeech.AudioEncoding.MP3, speaking_rate=1.2,
+        effects_profile_id=['handset-class-device'])
     response = client.synthesize_speech(
         input=synthesis_input, voice=voice, audio_config=audio_config
     )
@@ -87,9 +92,7 @@ def create_video(image_paths, audio_paths, padding_time: float = 1.0) -> Composi
         # Set the duration of the image clip to the duration of the audio clip
         image_clip = image_clip.set_duration(audio_clip.duration)
 
-        # Add padding time to the end of the clip (with last frame still visible)
-        if i != len(image_paths) - 1:
-            image_clip = image_clip.set_end(image_clip.end + padding_time)
+        audio_clip = audio_fadeout.audio_fadeout(audio_clip, 0.1)
 
         # Combine the image and audio clips
         clip = image_clip.set_audio(audio_clip)
@@ -101,6 +104,39 @@ def create_video(image_paths, audio_paths, padding_time: float = 1.0) -> Composi
     video = concatenate_videoclips(clips)
 
     return video
+
+
+def add_music(video_path, music_dir):
+    """
+    Add random lofi backing track to video. Normalize audio so it isn't overpowering.
+
+    :param video_path: path of original video
+    :return:
+    """
+    print("Adding music...")
+    audio_options = [f for f in os.listdir(music_dir) if f.endswith(".mp3")]
+    mp3_file = random.choice(audio_options)
+    video_clip = VideoFileClip(video_path)
+    audio_clip = AudioFileClip(os.path.join(music_dir, mp3_file))
+    normalized_audio_clip = audio_normalize.audio_normalize(audio_clip)
+    normalized_audio_clip = volumex.volumex(normalized_audio_clip, 0.05)
+    video_duration = video_clip.duration
+    min_start_time = 30.0  # first 30 seconds are build up in most music
+    max_start_time = normalized_audio_clip.duration - video_duration
+    start_time = random.uniform(min_start_time, max_start_time)
+    end_time = start_time + video_duration
+    print(f"Chose {mp3_file} from {start_time} - {end_time}")
+    audio_segment = normalized_audio_clip.subclip(start_time, end_time)
+    audio_segment = audio_fadein.audio_fadein(audio_segment, 1)
+    audio_segment = audio_fadeout.audio_fadeout(audio_segment, 1)
+
+    final_audio_clip = CompositeAudioClip([video_clip.audio, audio_segment])
+    final_clip = video_clip.set_audio(final_audio_clip)
+
+    new_file_name = video_path.replace(".mp4", "_with_music.mp4")
+    final_clip.write_videofile(new_file_name, codec="libx264", audio_codec="aac", fps=30)
+    print("Done adding music!")
+    return new_file_name
 
 
 def resize_maintain_aspect_ratio(image, width):
@@ -121,7 +157,7 @@ def resize_maintain_aspect_ratio(image, width):
     return resized
 
 
-def add_to_background(image_paths, background_path):
+def add_background_to_images(image_paths, background_path):
     """
     Given a list of image paths and a background image path, add each image to the background image and save the result.
     - Also trims the top of the comment images to hide the "single comment thread" text
@@ -135,7 +171,7 @@ def add_to_background(image_paths, background_path):
     bg_paths = []
     for index, image_path in enumerate(image_paths):
         img = cv2.imread(image_path)
-        img = resize_maintain_aspect_ratio(img, 900)
+        img = resize_maintain_aspect_ratio(img, 750)
         if index != 0:
             # trim the top to hide the "single comment thread"
             img = img[75:, :, :]
@@ -153,18 +189,16 @@ def add_to_background(image_paths, background_path):
     return bg_paths
 
 
-def create_random_colour_background(output_name):
-    """
-    Create a 1080 x 1920 background png with a random colour. It should be a bright colour to attract viewers.
-    Made using HSV in OpenCV, one solid colour, saved to output_name.
-    """
-    img = np.zeros((1920, 1080, 3), np.uint8)
-    sat = np.random.randint(200, 255)
-    val = np.random.randint(200, 255)
-    hue = np.random.randint(0, 179)
-    # convert hsv to bgr
-    img[:] = cv2.cvtColor(np.array([[[hue, sat, val]]], dtype=np.uint8), cv2.COLOR_HSV2BGR)
-    cv2.imwrite(output_name, img)
+def add_silence_to_mp3s(mp3_paths):
+    for mp3_path in mp3_paths:
+        audio_file = AudioSegment.from_file(mp3_path, format="mp3")
+
+        # Add 1 second of silence to the end of the audio file
+        silence = AudioSegment.silent(duration=1, frame_rate=44100)  # 1000ms = 1s
+        audio_file = audio_file + silence
+
+        # Export the new audio file with the added silence
+        audio_file.export(mp3_path, format="mp3")
 
 
 def make_and_post_video(post_with_comments: PostWithComments):
@@ -174,22 +208,33 @@ def make_and_post_video(post_with_comments: PostWithComments):
 
     :return: path to video if succeeded, or None otherwise
     """
-    if post_with_comments is None:
-        return
+
     if isinstance(post_with_comments, asyncio.Future):
         post_with_comments = post_with_comments.result()
+    if post_with_comments is None:
+        return
     print(f"3. Making video for post {post_with_comments.post.post_id}...")
 
     audio_paths = make_mp3s(post_with_comments)
+    add_silence_to_mp3s(audio_paths)
+
     image_paths = get_all_image_paths(post_with_comments)
-    create_random_colour_background(os.path.join(os.getcwd(), "background.png"))
-    image_w_bg_paths = add_to_background(image_paths, "background.png")
+    image_w_bg_paths = add_background_to_images(image_paths, "background.png")
     video_clip = create_video(image_w_bg_paths, audio_paths)
 
     video_path = os.path.join(os.getcwd(), "videos", f"{post_with_comments.post.post_id}.mp4")
     video_clip.write_videofile(video_path, codec="libx264", audio_codec="aac", fps=30)
     print(f"Done making video for {post_with_comments.post.post_id}, output to {video_path}")
 
+    music_dir = os.path.join(os.getcwd(), "music")
+    final_video_path = add_music(video_path, music_dir)
+    if post_with_comments.subreddit.lower() == "askreddit":
+        try:
+            youtube_lib.upload_to_askreddit_channel(final_video_path, post_with_comments.post.text)
+        except Exception as e:
+            print(f"Error uploading to youtube: {e}")
+
 
 if __name__ == '__main__':
+    youtube_lib.upload_to_askreddit_channel(r'K:\Big_Pycharm_Projects\ReddYT\videos\129k7ok.mp4', "What's the first sign that a movie is going to be bad?")
     pass
