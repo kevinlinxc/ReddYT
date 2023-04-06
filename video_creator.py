@@ -16,13 +16,51 @@ import youtube_lib
 import random
 from moviepy.audio.fx import audio_normalize, audio_fadein, audio_fadeout, volumex
 from pydub import AudioSegment
+import re
+
 
 # voices: https://cloud.google.com/text-to-speech/docs/voices
+def text_to_ssml_break_after_questions(text):
+    # Replace question marks with break tags
+    text = re.sub(r'\?', '?<break time="500ms"/>', text)
+    # Wrap text with SSML tags
+    ssml = f'<speak>{text}</speak>'
+    return ssml
+
+def preprocess_text(text):
+    link_pattern = re.compile(r'\[(.*?)\]\(.*?\)')
+
+    # Replace each link with just the text inside the square brackets
+    text_without_links = link_pattern.sub(r'\1', text)
+    # remove any https://www. or http://www.
+    text_without_links = text_without_links.replace("https://www.", "")
+    text_without_links = text_without_links.replace("http://www.", "")
+    text_without_links = text_without_links.replace("https://", "")
+    for site_end in ['com', 'ca', 'org', 'net']:
+        text_without_links = text_without_links.replace(f".{site_end}/", f".{site_end}")
+
+    # replace r/anything with r slash anything
+    pattern = r'r/(\w+)'
+    replacement = r'r slash \1'
+    # Replace all occurrences of "r/[anything]" with "r slash anything"
+    new_text = re.sub(pattern, replacement, text_without_links)
+
+    pattern = r'\bOP\b'
+    replacement = 'oh pee'
+
+    # Replace all occurrences of "OP" with "oh pee"
+    new_text = re.sub(pattern, replacement, new_text)
+
+    return new_text
 
 
 def tts(text, output_file):
     """Use GCP text to speech to make an mp3 file from text."""
     client = texttospeech.TextToSpeechClient()
+    # if "?" in text:
+    #     text = text_to_ssml_break_after_questions(text)
+    #     synthesis_input = texttospeech.SynthesisInput(ssml=text)
+    # else:
     synthesis_input = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
         language_code="en-US", name="en-US-Studio-M")
@@ -55,6 +93,7 @@ def make_mp3s(post_with_comments):
     comments = post_with_comments.comments
     for comment in comments:
         text = comment.text
+        text = preprocess_text(text)
         comment_mp3 = f"{post_id}_{comment.comment_id}.mp3"
         comment_path = os.path.join(audio_path, comment_mp3)
         if os.path.exists(comment_path):
@@ -190,15 +229,19 @@ def add_background_to_images(image_paths, background_path):
 
 
 def add_silence_to_mp3s(mp3_paths):
+    return_list = []
     for mp3_path in mp3_paths:
         audio_file = AudioSegment.from_file(mp3_path, format="mp3")
 
         # Add 1 second of silence to the end of the audio file
-        silence = AudioSegment.silent(duration=1, frame_rate=44100)  # 1000ms = 1s
+        silence = AudioSegment.silent(duration=700)  # 1000ms = 1s
         audio_file = audio_file + silence
 
+        export_path = mp3_path[:-4] + "_with_silence.mp3"
         # Export the new audio file with the added silence
-        audio_file.export(mp3_path, format="mp3")
+        audio_file.export(export_path, format="mp3")
+        return_list.append(export_path)
+    return return_list
 
 
 def make_and_post_video(post_with_comments: PostWithComments):
@@ -216,18 +259,21 @@ def make_and_post_video(post_with_comments: PostWithComments):
     print(f"3. Making video for post {post_with_comments.post.post_id}...")
 
     audio_paths = make_mp3s(post_with_comments)
-    add_silence_to_mp3s(audio_paths)
+    audio_paths = add_silence_to_mp3s(audio_paths)
 
     image_paths = get_all_image_paths(post_with_comments)
     image_w_bg_paths = add_background_to_images(image_paths, "background.png")
     video_clip = create_video(image_w_bg_paths, audio_paths)
 
     video_path = os.path.join(os.getcwd(), "videos", f"{post_with_comments.post.post_id}.mp4")
+    if os.path.exists(video_path):
+        os.remove(video_path)
     video_clip.write_videofile(video_path, codec="libx264", audio_codec="aac", fps=30)
     print(f"Done making video for {post_with_comments.post.post_id}, output to {video_path}")
 
     music_dir = os.path.join(os.getcwd(), "music")
     final_video_path = add_music(video_path, music_dir)
+
     if post_with_comments.subreddit.lower() == "askreddit":
         try:
             youtube_lib.upload_to_askreddit_channel(final_video_path, post_with_comments.post.text)
@@ -236,5 +282,6 @@ def make_and_post_video(post_with_comments: PostWithComments):
 
 
 if __name__ == '__main__':
-    youtube_lib.upload_to_askreddit_channel(r'K:\Big_Pycharm_Projects\ReddYT\videos\129k7ok.mp4', "What's the first sign that a movie is going to be bad?")
+    youtube_lib.upload_to_askreddit_channel(r'K:\Big_Pycharm_Projects\ReddYT\videos\129k7ok.mp4',
+                                            "What's the first sign that a movie is going to be bad?")
     pass

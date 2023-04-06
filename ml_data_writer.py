@@ -1,7 +1,7 @@
 from reddit_lib import MetaComment, MetaPost
 
-posts_file = "posts.csv"
-comments_file = "comments.csv"
+posts_file = "ML/posts.csv"
+comments_file = "ML/comments.csv"
 
 
 def write_post_to_csv(post: MetaPost, accepted: bool):

@@ -1,6 +1,6 @@
 import time
 from selenium import webdriver
-from selenium.common.exceptions import ElementNotVisibleException
+from selenium.common.exceptions import ElementNotVisibleException, ElementClickInterceptedException, ElementNotInteractableException
 from pyshadow.main import Shadow
 import praw
 from dataclasses import dataclass
@@ -46,7 +46,7 @@ class CommentFailedToCapture(Exception):
     pass
 
 
-def get_top_n_post_ids(praw_inst, subreddit, n, time_filter="day"):
+def get_top_n_posts(praw_inst, subreddit, n, time_filter="day"):
     """Get the IDs of the top n posts from a subreddit.
 
     Args:
@@ -67,6 +67,14 @@ def get_top_n_post_ids(praw_inst, subreddit, n, time_filter="day"):
             if posts_found == n:
                 break
     print(f"Found {posts_found} posts")
+    return return_list
+
+
+def get_posts(praw_inst, ids):
+    return_list = []
+    for id in ids:
+        post = praw_inst.submission(id=id)
+        return_list.append(MetaPost(text=post.title, post_id=post.id))
     return return_list
 
 
@@ -148,6 +156,9 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit, re
         shadow.find_element('[id="comment-fold-button"]').click()
     except ElementNotVisibleException:  # some comments might not have replies, ignore
         pass
+    except (ElementClickInterceptedException, ElementNotInteractableException):
+        print("Warning, comment is probably longer than the screen")
+        pass
     try:
         comment_element = shadow.find_element(f'[thingid="t1_{comment_id}"]')
 
@@ -169,17 +180,25 @@ reddit = praw.Reddit(user_agent="Fetching top posts to compile into an informati
                      password=os.environ['reddit_password'])
 
 
-def get_n_posts_with_m_comments(subreddit, n, m):
+def get_n_posts_with_m_comments(subreddit, n, m, prime=None):
     """
     Get the top n posts from a subreddit, and the top m comments from each post.
+    If prime is given (a list of string ids), ignore n and use the ids in prime instead.
     This is the main function that ties everything together.
     It returns a list of PostWithComments objects
     """
-    print(f"1. Getting top {n} posts from r/{subreddit} with {m} comments each")
+    if m > 17:
+        raise RuntimeError("M cant be greater than 17, or else discord won't have enough reactions.")
+    if prime is None:
 
-    top_posts = get_top_n_post_ids(reddit, subreddit, n)
+        print(f"1. Getting top {n} posts from r/{subreddit} with {m} comments each")
+        posts = get_top_n_posts(reddit, subreddit, n)
+    else:
+        print(f"Ignoring n, using ids from prime")
+        posts = get_posts(reddit, prime)
+
     successful_meta_posts_with_comments = []
-    for index, meta_post in enumerate(top_posts):
+    for index, meta_post in enumerate(posts):
         print(f"Post {index + 1}: {meta_post.text}")
         images_dir = os.path.join(os.getcwd(), "images")
         image_path = os.path.join(images_dir, f"{meta_post.post_id}.png")

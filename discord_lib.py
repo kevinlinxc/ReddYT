@@ -26,13 +26,20 @@ async def curate(post_with_comments: PostWithComments, callback):
         n = len(comments)
 
         # create the message with the question and answers
-        message = ""
-        for i in range(n):
-            message += f'{chr(65 + i)}: {comments[i].text}\n'
-        message += '\nReact with the letters of your chosen answers and ✅ to confirm or ❌ to cancel. ' \
-                   '\nYou can also react with 👍 to select all the comments.'
         await channel.send("##############################\nStarting AskReddit video!\n\n")
         await channel.send(file=discord.File(post_with_comments.post.path_to_image))
+        message = ""
+        for i in range(n):
+            tentative_message = message
+            tentative_message += f'{chr(65 + i)}: {comments[i].text}\n'
+            if len(tentative_message) > 2000:
+                await channel.send(message)
+                message = ""
+            else:
+                message = tentative_message
+        message += '\nReact with the letters of your chosen answers and ✅ to confirm or ❌ to cancel. ' \
+                   '\nYou can also react with 👍 to select all the comments.'
+
         sent_message = await channel.send(message)
 
         # add the reactions
@@ -52,7 +59,6 @@ async def curate(post_with_comments: PostWithComments, callback):
                 reaction, user = await client.wait_for('reaction_add', timeout=None, check=check)
                 if str(reaction.emoji) == '👍':
                     # update sent_message
-                    sent_message = await channel.fetch_message(sent_message.id)
                     ml_data_writer.write_post_to_csv(post_with_comments.post, True)
                     for comment in comments:
                         ml_data_writer.write_comment_to_csv(comment, True)
@@ -83,6 +89,7 @@ async def curate(post_with_comments: PostWithComments, callback):
                     future.set_result(post_with_comments)
                     return
                 elif str(reaction.emoji) == '❌':
+                    await channel.send("Declined post.")
                     ml_data_writer.write_post_to_csv(post_with_comments.post, False)
                     future.set_result(None)
                     return

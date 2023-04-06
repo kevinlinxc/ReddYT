@@ -3,14 +3,22 @@ import video_creator
 import discord_lib
 import asyncio
 from dotenv import load_dotenv
+from typing import List
 load_dotenv()
 
 
 # functions that each produce a video/videos for the YouTube channels
-def make_askreddit_video():
+def make_askreddit_video(prime: List[str]=None):
+    """Make a video for the AskReddit channel.
+    Prime should be a list of Reddit post ids or None.
+    """
     try:
-        # 1. Get the popular recent posts
-        posts_with_comments = reddit_lib.get_n_posts_with_m_comments("AskReddit", 1, 5)
+        if prime is None:
+            # 1. Get the popular recent posts
+            posts_with_comments = reddit_lib.get_n_posts_with_m_comments("AskReddit", 5, 10)
+        else:
+            # use the post(s) that were given to us
+            posts_with_comments = reddit_lib.get_n_posts_with_m_comments("AskReddit", 1, 17, prime=prime)
 
         # 2. send to Discord for curation
         for index, post_with_comment in enumerate(posts_with_comments):
@@ -25,4 +33,6 @@ def make_askreddit_video():
 
 
 if __name__ == '__main__':
-    make_askreddit_video()
+    make_askreddit_video(prime=['11zmpjf'])
+    # make_askreddit_video()
+    # todo ikm2fo
