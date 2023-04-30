@@ -33,6 +33,6 @@ def make_askreddit_video(prime: List[str]=None):
 
 
 if __name__ == '__main__':
-    make_askreddit_video(prime=['11zmpjf'])
+    make_askreddit_video(prime=['12b97tx'])
     # make_askreddit_video()
     # todo ikm2fo

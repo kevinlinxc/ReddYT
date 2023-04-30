@@ -1,12 +1,23 @@
 import time
 from selenium import webdriver
-from selenium.common.exceptions import ElementNotVisibleException, ElementClickInterceptedException, ElementNotInteractableException
+from selenium.common.exceptions import ElementNotVisibleException, ElementClickInterceptedException, \
+    ElementNotInteractableException
 from pyshadow.main import Shadow
-import praw
+import asyncpraw as praw
+import logging
+import shutil
+
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+for logger_name in ("asyncpraw", "asyncprawcore"):
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
 from dataclasses import dataclass
 from typing import Optional
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -15,6 +26,8 @@ class MetaPost:
     """A class to hold the metadata of a Reddit post."""
     text: str  # title
     post_id: str
+    nsfw: bool
+    score: int
     path_to_image: Optional[str] = None
 
 
@@ -32,6 +45,7 @@ class PostWithComments:
     A class to hold a Reddit post and its comments together. Used as the main data structure being passed around
     for this project.
     """
+
     def __init__(self, post: MetaPost, comments: list, subreddit: str):
         self.post = post
         self.comments = comments
@@ -46,7 +60,7 @@ class CommentFailedToCapture(Exception):
     pass
 
 
-def get_top_n_posts(praw_inst, subreddit, n, time_filter="day"):
+async def get_top_n_posts(praw_inst, subreddit, n, time_filter="day"):
     """Get the IDs of the top n posts from a subreddit.
 
     Args:
@@ -60,9 +74,10 @@ def get_top_n_posts(praw_inst, subreddit, n, time_filter="day"):
     # ignore nsfw posts, they have an annoying modal, and we don't want them on YouTube anyway
     return_list = []
     posts_found = 0
-    for post in praw_inst.subreddit(subreddit).top(time_filter=time_filter):
+    sub = await praw_inst.subreddit(subreddit)
+    async for post in sub.top(time_filter=time_filter):
         if not post.over_18:
-            return_list.append(MetaPost(text=post.title, post_id=post.id))
+            return_list.append(MetaPost(text=post.title, post_id=post.id, nsfw=post.over_18, score=post.score))
             posts_found += 1
             if posts_found == n:
                 break
@@ -74,7 +89,7 @@ def get_posts(praw_inst, ids):
     return_list = []
     for id in ids:
         post = praw_inst.submission(id=id)
-        return_list.append(MetaPost(text=post.title, post_id=post.id))
+        return_list.append(MetaPost(text=post.title, post_id=post.id, nsfw=post.over_18))
     return return_list
 
 
@@ -94,7 +109,25 @@ def get_top_n_comments_from_post(praw_inst, post_id, n):
             post.comments[:n]]
 
 
-def capture_reddit_mobile_post_card(post_id, image_path):
+async def async_get_top_n_comments_from_post(praw_inst, post_id, n):
+    """Get the top n comments from a post.
+
+    Args:
+        post_id (str): The ID of the post to get comments from.
+        n (int): The number of comments to get.
+
+    Returns:
+        list: A list of comments.
+    """
+    print("Getting top n comments from post with id: " + post_id)
+    post = await praw_inst.submission(post_id)
+    await post.comments.replace_more(limit=0)
+    comments = post.comments._comments[:n]
+    return [MetaComment(text=comment.body, post_id=comment.link_id, comment_id=comment.id) for comment in
+            comments]
+
+
+def capture_reddit_mobile_post_card(post_id, image_path, nsfw=False):
     """Capture a screenshot of the mobile preview card for a Reddit post.
 
     Args:
@@ -103,13 +136,16 @@ def capture_reddit_mobile_post_card(post_id, image_path):
     Returns none
     """
     # Set up the Chrome driver with mobile device emulation
-    mobile_emulation = {
-        "deviceMetrics": {"width": 400, "height": 700, "pixelRatio": 3.0},
-        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3 like Mac OS X) AppleWebKit/602.1.50 (KHTML, like Gecko) CriOS/56.0.2924.75 Mobile Safari/535.19"
-    }
-    options = webdriver.ChromeOptions()
-    options.add_experimental_option("mobileEmulation", mobile_emulation)
-    driver = webdriver.Chrome(options=options)
+    if nsfw:
+        driver = webdriver.Chrome()
+    else:
+        mobile_emulation = {
+            "deviceMetrics": {"width": 400, "height": 700, "pixelRatio": 3.0},
+            "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3 like Mac OS X) AppleWebKit/602.1.50 (KHTML, like Gecko) CriOS/56.0.2924.75 Mobile Safari/535.19"
+        }
+        options = webdriver.ChromeOptions()
+        options.add_experimental_option("mobileEmulation", mobile_emulation)
+        driver = webdriver.Chrome(options=options)
     driver.execute_script("document.body.style.zoom='120%'")
 
     # Navigate to the post and wait for the preview card to load
@@ -171,13 +207,17 @@ def capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit, re
         capture_reddit_comment_mobile(post_id, comment_id, image_path, subreddit, retry=True)
 
 
-
 # Sign in to Reddit using API Key
-reddit = praw.Reddit(user_agent="Fetching top posts to compile into an informative video",
-                     client_id=os.environ['reddit_client_id'],
-                     client_secret=os.environ['reddit_client_secret'],
-                     username=os.environ['reddit_username'],
-                     password=os.environ['reddit_password'])
+def create_reddit():
+    return praw.Reddit(user_agent="Fetching top posts to compile into an informative video",
+                       client_id=os.environ['reddit_client_id'],
+                       client_secret=os.environ['reddit_client_secret'],
+                       username=os.environ['reddit_username'],
+                       password=os.environ['reddit_password'],
+                       timeout=30)
+
+
+reddit = create_reddit()
 
 
 def get_n_posts_with_m_comments(subreddit, n, m, prime=None):
@@ -201,10 +241,10 @@ def get_n_posts_with_m_comments(subreddit, n, m, prime=None):
     for index, meta_post in enumerate(posts):
         print(f"Post {index + 1}: {meta_post.text}")
         images_dir = os.path.join(os.getcwd(), "images")
-        image_path = os.path.join(images_dir, f"{meta_post.post_id}.png")
+        image_path = os.path.join(images_dir, f"{meta_post.post_id}", f"{meta_post.post_id}.png")
         meta_post.path_to_image = image_path
         try:
-            capture_reddit_mobile_post_card(meta_post.post_id, image_path)
+            capture_reddit_mobile_post_card(meta_post.post_id, image_path, nsfw=meta_post.nsfw)
         except Exception as e:
             print(f"Failed to capture post {meta_post.post_id} with error: {e}")
             raise PostFailedToCapture(e)
@@ -216,7 +256,7 @@ def get_n_posts_with_m_comments(subreddit, n, m, prime=None):
         successful_meta_comments = []
         for com_index, meta_comment in enumerate(comments):
             print(f"\t {com_index + 1}: {meta_comment.text}")
-            image_path = os.path.join(images_dir, f"{meta_post.post_id}_{meta_comment.comment_id}.png")
+            image_path = os.path.join(images_dir, f"{meta_post.post_id}", f"{meta_post.post_id}_{meta_comment.comment_id}.png")
             try:
                 capture_reddit_comment_mobile(meta_post.post_id, meta_comment.comment_id, image_path, subreddit)
                 meta_comment.path_to_image = image_path
@@ -235,7 +275,49 @@ def get_n_posts_with_m_comments(subreddit, n, m, prime=None):
     return successful_meta_posts_with_comments
 
 
+def get_images_for_post_with_comments(post_with_comments: PostWithComments):
+    """
+    Given a PostWithComments object, download the images for the post and its comments
+    """
+    meta_post = post_with_comments.post
+    images_dir = os.path.join(os.getcwd(), "images")
+    post_dir = os.path.join(images_dir, f"{meta_post.post_id}")
+    if os.path.exists(post_dir):
+        shutil.rmtree(post_dir)
+    os.mkdir(os.path.join(images_dir, f"{meta_post.post_id}"))
+    image_path = os.path.join(images_dir, f"{meta_post.post_id}", f"{meta_post.post_id}.png")
+    print(f"Fetching image for post")
+    try:
+        capture_reddit_mobile_post_card(meta_post.post_id, image_path, nsfw=meta_post.nsfw)
+        meta_post.path_to_image = image_path
+    except Exception as e:
+        print(f"Failed to capture post {meta_post.post_id} with error: {e}")
+        raise PostFailedToCapture(e)
+
+    comments = post_with_comments.comments
+    meta_comment: MetaComment
+    print("\t Fetching images for comments:")
+
+    successful_meta_comments = []
+    for com_index, meta_comment in enumerate(comments):
+        print(f"\t {com_index + 1}: {meta_comment.text}")
+        image_path = os.path.join(images_dir, f"{meta_post.post_id}", f"{meta_post.post_id}_{meta_comment.comment_id}.png")
+        try:
+            capture_reddit_comment_mobile(meta_post.post_id, meta_comment.comment_id, image_path, post_with_comments.subreddit)
+            meta_comment.path_to_image = image_path
+            successful_meta_comments.append(meta_comment)
+        except Exception as e:
+            print(f"Failed to capture comment {meta_comment.comment_id} with error: {e}")
+            raise CommentFailedToCapture(e)
+    if len(successful_meta_comments) == 0:
+        print("Failed to capture any comments for this post. Skipping...")
+    else:
+        # posts AND their comments succeeded, so make a PostWithComments object
+        return PostWithComments(meta_post, successful_meta_comments, post_with_comments.subreddit)
+
+
 if __name__ == '__main__':
     from dotenv import load_dotenv
+
     load_dotenv()
     get_n_posts_with_m_comments("AskReddit", 1, 5)

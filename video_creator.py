@@ -244,14 +244,7 @@ def add_silence_to_mp3s(mp3_paths):
     return return_list
 
 
-def make_and_post_video(post_with_comments: PostWithComments):
-    """
-    Given a PostWithComments object, make a video showing the pictures of the post, followed by the comments,
-    all with voiceover.
-
-    :return: path to video if succeeded, or None otherwise
-    """
-
+def make_video_from_post_with_comments(post_with_comments: PostWithComments):
     if isinstance(post_with_comments, asyncio.Future):
         post_with_comments = post_with_comments.result()
     if post_with_comments is None:
@@ -262,6 +255,7 @@ def make_and_post_video(post_with_comments: PostWithComments):
     audio_paths = add_silence_to_mp3s(audio_paths)
 
     image_paths = get_all_image_paths(post_with_comments)
+    print(image_paths)
     image_w_bg_paths = add_background_to_images(image_paths, "background.png")
     video_clip = create_video(image_w_bg_paths, audio_paths)
 
@@ -273,9 +267,21 @@ def make_and_post_video(post_with_comments: PostWithComments):
 
     music_dir = os.path.join(os.getcwd(), "music")
     final_video_path = add_music(video_path, music_dir)
+    return final_video_path
+
+
+def make_and_post_video(post_with_comments: PostWithComments):
+    """
+    Given a PostWithComments object, make a video showing the pictures of the post, followed by the comments,
+    all with voiceover.
+
+    :return: path to video if succeeded, or None otherwise
+    """
+    final_video_path = make_video_from_post_with_comments(post_with_comments)
 
     if post_with_comments.subreddit.lower() == "askreddit":
         try:
+            print("Posting to youtube...")
             youtube_lib.upload_to_askreddit_channel(final_video_path, post_with_comments.post.text)
         except Exception as e:
             print(f"Error uploading to youtube: {e}")
