@@ -64,6 +64,21 @@ async def main():
         await print_current_posts(ctx)
         await ctx.send("Use !pick <number> to pick a post to fetch comments for.")
 
+    @client.command(aliases=['s'], description="Search a subreddit for a query, sets current posts to the results")
+    async def search(ctx, arg1="askreddit", arg2=None, arg3=5):
+        print("!search called")
+        if arg2 is None:
+            await ctx.send("Please enter a query as the second argument")
+            return
+        posts = await reddit_lib.search_subreddit(reddit, arg1, arg2, n=5)
+        global current_posts
+        current_posts = posts
+        global current_subreddit
+        current_subreddit = arg1
+        await ctx.send(f"Here are the top {arg3} posts in {arg1} for {arg2}:")
+        await print_current_posts(ctx)
+        await ctx.send("Use !pick <number> to pick a post to fetch comments for.")
+
     @client.command(aliases=['current', 'posts', 'print'],
                     description="View the current posts again")
     async def print_current_posts(ctx):

@@ -85,6 +85,30 @@ async def get_top_n_posts(praw_inst, subreddit, n, time_filter="day"):
     return return_list
 
 
+async def search_subreddit(praw_inst, subreddit, query, n=5):
+    """Search a subreddit for a query.
+
+    Args:
+        subreddit (str): The name of the subreddit to search.
+        query (str): The query to search for.
+        n (int): The number of posts to get.
+
+    Returns:
+        list: A list of post IDs.
+
+    """
+    return_list = []
+    posts_found = 0
+    sub = await praw_inst.subreddit(subreddit)
+    async for post in sub.search(query, limit=n, sort="top"):
+        if not post.over_18:
+            return_list.append(MetaPost(text=post.title, post_id=post.id, nsfw=post.over_18, score=post.score))
+            posts_found += 1
+            if posts_found == n:
+                break
+    print(f"Found {posts_found} posts")
+    return return_list
+
 def get_posts(praw_inst, ids):
     return_list = []
     for id in ids:

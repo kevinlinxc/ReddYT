@@ -1,0 +1,10 @@
+selenium==4.8.3 # for taking screenshots of reddit
+asyncpraw # for finding reddit posts
+pyshadow~=0.0.5 # for accessing the shadow dom of Reddit
+google-cloud-texttospeech # for turning test to speech
+discord.py # for sending to discord for curation
+moviepy # for editing the video together. Needed pip install moviepy --pre --upgrade for  bug fix
+python-dotenv~=1.0.0 # for my sanity
+simple-youtube-api # for uploading youtube videos
+pydub # for adding silence to the audio clips
+tweepy
