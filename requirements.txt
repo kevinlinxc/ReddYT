@@ -7,4 +7,4 @@ moviepy # for editing the video together. Needed pip install moviepy --pre --upg
 python-dotenv~=1.0.0 # for my sanity
 simple-youtube-api # for uploading youtube videos
 pydub # for adding silence to the audio clips
-tweepy
+pytrends

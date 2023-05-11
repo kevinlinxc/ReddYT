@@ -8,6 +8,7 @@ import trends_lib
 import reddit_lib
 import video_creator
 import youtube_lib
+import traceback
 
 
 async def main():
@@ -177,6 +178,7 @@ async def main():
                     print(confirmation_message)
                     return post_with_comments
                 elif str(reaction.emoji) == '✅':
+                    print("Received check reaction")
                     # update sent_message
                     sent_message = await ctx.fetch_message(sent_message.id)
                     ml_data_writer.write_post_to_csv(post_with_comments.post, True)
@@ -195,10 +197,12 @@ async def main():
                     print(confirmation_message)
                     return post_with_comments
                 elif str(reaction.emoji) == '❌':
+                    print("Received cancel reaction")
                     await ctx.send("Declined post.")
                     ml_data_writer.write_post_to_csv(post_with_comments.post, False)
                     return
             except asyncio.TimeoutError:
+                traceback.print_exc()
                 return
 
     async def confirm_video(ctx, video_path, post_with_comments: reddit_lib.PostWithComments):
@@ -220,7 +224,9 @@ async def main():
             view.stop()
 
         async def done_button_callback(interaction: discord.Interaction):
-            view.stop()
+            # remove the buttons
+            message = interaction.message
+            await message.edit(view=None)
 
         upload_button = discord.ui.Button(style=discord.ButtonStyle.green, label='Upload')
         upload_button.callback = upload_button_callback

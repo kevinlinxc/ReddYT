@@ -27,6 +27,7 @@ def text_to_ssml_break_after_questions(text):
     ssml = f'<speak>{text}</speak>'
     return ssml
 
+
 def preprocess_text(text):
     link_pattern = re.compile(r'\[(.*?)\]\(.*?\)')
 
@@ -51,6 +52,9 @@ def preprocess_text(text):
     # Replace all occurrences of "OP" with "oh pee"
     new_text = re.sub(pattern, replacement, new_text)
 
+    # remove all * from bolding
+    new_text = new_text.replace("*", "")
+
     return new_text
 
 
@@ -70,6 +74,8 @@ def tts(text, output_file):
     response = client.synthesize_speech(
         input=synthesis_input, voice=voice, audio_config=audio_config
     )
+    if os.path.exists(output_file):
+        os.remove(output_file)
     with open(output_file, "wb") as out:
         # Write the response to the output file.
         out.write(response.audio_content)
@@ -84,10 +90,7 @@ def make_mp3s(post_with_comments):
     audio_path = os.path.join(os.getcwd(), "audio")
     post_mp3 = f"{post_id}.mp3"
     post_path = os.path.join(audio_path, post_mp3)
-    if os.path.exists(post_path):
-        print(f"TTS file already exists for {post_id}, skipping")
-    else:
-        tts(post_with_comments.post.text, post_path)
+    tts(post_with_comments.post.text, post_path)
     mp3s.append(post_path)
 
     comments = post_with_comments.comments
@@ -96,10 +99,7 @@ def make_mp3s(post_with_comments):
         text = preprocess_text(text)
         comment_mp3 = f"{post_id}_{comment.comment_id}.mp3"
         comment_path = os.path.join(audio_path, comment_mp3)
-        if os.path.exists(comment_path):
-            print(f"TTS file already exists for {post_id}_{comment.comment_id}, skipping")
-        else:
-            tts(text, comment_path)
+        tts(text, comment_path)
         mp3s.append(comment_path)
     return mp3s
 
@@ -173,6 +173,8 @@ def add_music(video_path, music_dir):
     final_clip = video_clip.set_audio(final_audio_clip)
 
     new_file_name = video_path.replace(".mp4", "_with_music.mp4")
+    if os.path.exists(new_file_name):
+        os.remove(new_file_name)
     final_clip.write_videofile(new_file_name, codec="libx264", audio_codec="aac", fps=30)
     print("Done adding music!")
     return new_file_name
