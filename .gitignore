@@ -7,3 +7,5 @@ __pycache__/
 .env
 videos/*
 credentials.storage
+build/*
+*.exe
